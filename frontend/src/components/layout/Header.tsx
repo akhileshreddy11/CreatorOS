@@ -1,36 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { Bell, Search, UserCircle2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 export default function Header() {
   return (
-    <header className="h-20 border-b border-zinc-800 bg-zinc-950 flex items-center justify-between px-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white">
-          Welcome Back 👋
-        </h1>
-
-        <p className="text-zinc-400 text-sm">
-          Let's create something amazing today.
-        </p>
-      </div>
-
+    <header className="sticky top-0 z-40 flex h-20 items-center justify-between border-b border-zinc-800 bg-[#09090b]/80 px-8 backdrop-blur-xl">
+      <div><h1 className="text-2xl font-bold text-white">CreatorOS</h1><p className="mt-1 text-sm text-zinc-400">AI Operating System · Hyderabad pilot</p></div>
       <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 rounded-xl bg-zinc-900 px-4 py-2">
-          <Search size={18} className="text-zinc-400" />
-          <input
-            placeholder="Search..."
-            className="bg-transparent outline-none text-white placeholder:text-zinc-500"
-          />
-        </div>
-
-        <button className="rounded-xl bg-zinc-900 p-3 hover:bg-zinc-800 transition">
-          <Bell className="text-white" size={20} />
-        </button>
-
-        <button className="rounded-full bg-blue-600 p-2">
-          <UserCircle2 className="text-white" size={28} />
-        </button>
+        <div className="relative hidden md:block"><Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" /><Input placeholder="Search operations…" aria-label="Search operations" className="h-12 w-80 rounded-2xl border-zinc-700 bg-zinc-900 pl-11" /></div>
+        <Link href="/drafts" aria-label="Open pending draft approvals" className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 transition hover:bg-zinc-800"><Bell size={20} /><span className="absolute right-3 top-3 h-2 w-2 rounded-full bg-indigo-500" /></Link>
+        <Link href="/settings" aria-label="Open settings" className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500"><UserCircle2 size={26} /></Link>
       </div>
     </header>
   );

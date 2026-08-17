@@ -1,0 +1,58 @@
+{
+  "business": {
+    "name": "CreatorOS",
+    "owner": "Akhilesh",
+    "mission": "Help one local business niche generate measurable enquiries with useful local-language content and approval-gated follow-up.",
+    "vision": "AI handles routine research, drafting, tracking, and reporting while the owner controls high-risk actions."
+  },
+  "operating_configuration": {
+    "niche": "Gyms",
+    "city": "Hyderabad",
+    "primary_language": "en",
+    "supported_languages": ["en", "te", "hi"],
+    "offer": "Short videos, local offers, and approval-gated follow-up to generate more trial-class enquiries.",
+    "primary_kpi": "trial_class_enquiries",
+    "secondary_kpis": ["qualified_leads", "appointments", "reply_rate", "content_saves"],
+    "content_platforms": ["Instagram", "WhatsApp"],
+    "pilot": {
+      "month_1": "One discounted pilot customer",
+      "month_2": "Two or three paying customers",
+      "month_3_plus": "Four to six recurring customers"
+    }
+  },
+  "automation_policy": {
+    "automatic": [
+      "Read-only research",
+      "Social audits",
+      "Content and outreach drafts",
+      "Analytics summaries",
+      "Internal reports"
+    ],
+    "approval_required": [
+      "Publishing content",
+      "Sending outreach",
+      "Sending follow-up",
+      "Scheduling customer-facing appointments"
+    ],
+    "human_only": [
+      "Payments",
+      "Refunds",
+      "Contracts",
+      "Financial commitments",
+      "Account recovery",
+      "Legal, medical, or financial claims",
+      "Customer-data deletion"
+    ]
+  },
+  "goals": {
+    "primary_platform": "Instagram",
+    "secondary_platform": "WhatsApp",
+    "automation_level": "Approval-gated",
+    "owner_role": "Monitor growth, warnings, errors, approvals, and exceptions"
+  },
+  "current_status": {
+    "stage": "Pilot preparation",
+    "active_agents": [],
+    "case_study_permission": "Required before publishing customer results"
+  }
+}

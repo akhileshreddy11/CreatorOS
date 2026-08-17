@@ -1,25 +1,18 @@
 "use client";
 
+import Link from "next/link";
+import { ArrowRight, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 
 export default function QuickGenerate() {
   return (
-    <Card className="bg-zinc-900 border-zinc-800 text-white">
+    <Card className="border-zinc-800 bg-zinc-900 text-white">
       <CardHeader>
-        <CardTitle>⚡ Quick Generate</CardTitle>
+        <CardTitle className="flex items-center gap-2"><Sparkles className="text-indigo-400" size={19} />Quick draft</CardTitle>
       </CardHeader>
-
-      <CardContent className="space-y-4">
-        <Input
-          placeholder="Enter your reel topic..."
-          className="bg-zinc-950 border-zinc-700"
-        />
-
-        <Button className="w-full">
-          Generate with AI
-        </Button>
+      <CardContent>
+        <p className="text-sm leading-6 text-zinc-400">Create a reviewable Hyderabad gym asset with a trial-class enquiry CTA.</p>
+        <Link href="/ai-studio" className="mt-4 inline-flex items-center rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500">Open AI Studio <ArrowRight className="ml-2" size={16} /></Link>
       </CardContent>
     </Card>
   );

@@ -1,0 +1,43 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+!**/.env.example
+backend/.env
+frontend/.env
+
+# Python environments and caches
+.venv/
+venv/
+backend/venv/
+musetalk_env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local persistence and generated media
+*.db
+*.sqlite
+*.sqlite3
+backend/creatoros.db
+generated_audio/
+generated_reels/
+generated_visuals/
+generated_presenters/
+backend/generated_audio/
+backend/generated_reels/
+backend/generated_visuals/
+backend/generated_presenters/
+
+# Frontend/build artifacts
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+*.tsbuildinfo
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
