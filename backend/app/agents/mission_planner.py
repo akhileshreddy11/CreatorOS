@@ -27,6 +27,7 @@ Target audience: {', '.join(audience) if audience else 'Gym owners and local adu
 Audience problem: {problem}
 Business strategy: {strategy}
 Requirements: engaging and practical; optimize the opening without clickbait; include a clear trial-class enquiry CTA; support English, Hinglish, Telugu, or Hindi when requested; do not invent statistics, testimonials, health claims, revenue, or guaranteed outcomes; mark for human review before publishing.
+Output format: Instagram Reel-ready content. Include a hook, spoken script, caption, CTA, and hashtags suitable for a short vertical video. The Reel is rendered only after content validation and remains approval-gated.
 """.strip(),
                 assigned_by="COO",
                 assigned_to="Content Employee",
