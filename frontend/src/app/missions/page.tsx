@@ -43,6 +43,7 @@ export default function MissionsPage() {
   const [jobId, setJobId] = useState("");
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [discovering, setDiscovering] = useState(true);
 
   async function load(id: string) {
     if (!id) return;
@@ -56,9 +57,30 @@ export default function MissionsPage() {
     }
   }
 
+  async function discoverLatest() {
+    try {
+      const response = await fetch(`${API_URL}/missions/latest`, { cache: "no-store" });
+      if (!response.ok) return;
+      const latest = (await response.json()) as Job;
+      setJobId(latest.job_id);
+      setJob(latest);
+      window.localStorage.setItem("creatoros:lastMissionJob", latest.job_id);
+      setError(null);
+    } catch {
+      // No mission may exist yet; the empty state explains the next action.
+    } finally {
+      setDiscovering(false);
+    }
+  }
+
   useEffect(() => {
     const stored = window.localStorage.getItem("creatoros:lastMissionJob");
-    if (stored) setJobId(stored);
+    if (stored) {
+      setJobId(stored);
+      setDiscovering(false);
+      return;
+    }
+    void discoverLatest();
   }, []);
 
   useEffect(() => {
@@ -93,8 +115,9 @@ export default function MissionsPage() {
               <input id="mission-job" value={jobId} onChange={(event) => setJobId(event.target.value.trim())} placeholder="Paste a job ID returned after approval" className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500" />
             </div>
             <button type="button" onClick={() => void load(jobId)} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">Refresh</button>
+            <button type="button" onClick={() => void discoverLatest()} className="rounded-xl border border-zinc-700 bg-zinc-950 px-5 py-3 text-sm font-semibold text-zinc-200 hover:bg-zinc-800">Find Latest</button>
           </div>
-          <p className="mt-3 text-xs text-zinc-500">The latest mission job is remembered locally in this browser.</p>
+          <p className="mt-3 text-xs text-zinc-500">Mission Control automatically discovers the latest approved mission when no job ID is stored in this browser.</p>
         </section>
 
         {error && <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-sm text-red-300">{error}</div>}
@@ -133,7 +156,7 @@ export default function MissionsPage() {
           </>
         )}
 
-        {!job && !error && <div className="rounded-3xl border border-dashed border-zinc-700 p-12 text-center text-sm text-zinc-500">Approve an opportunity in the Opportunity Engine, then open Mission Control with the returned job ID.</div>}
+        {!job && !error && <div className="rounded-3xl border border-dashed border-zinc-700 p-12 text-center text-sm text-zinc-500">{discovering ? "Finding the latest mission..." : "Approve an opportunity in the Opportunity Engine, then return here. Mission Control will automatically discover the latest mission."}</div>}
       </div>
     </DashboardLayout>
   );
