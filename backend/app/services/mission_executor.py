@@ -24,6 +24,7 @@ class ExecutionResult(TypedDict, total=False):
     error: str
     media_type: str
     media_path: str
+    media_url: str
 
 
 class MissionExecutor:
@@ -84,17 +85,14 @@ class MissionExecutor:
         if task.assigned_to != self.CONTENT_EMPLOYEE or self.REEL_MARKER not in (task.description or ""):
             return None
         output_name = f"mission_{task.id}_reel.mp4"
-        path = self.reel_generator.create_reel(
-            result,
-            output_name=output_name,
-            language="en",
-        )
+        path = self.reel_generator.create_reel(result, output_name=output_name, language="en")
         path_obj = Path(path)
         if not path_obj.is_file() or path_obj.stat().st_size <= 0:
             raise RuntimeError("Reel renderer did not produce a valid MP4 file.")
         return {
             "media_type": "video/mp4",
             "media_path": str(path_obj),
+            "media_url": f"/media/reels/{path_obj.name}",
             "width": ReelGenerator.WIDTH,
             "height": ReelGenerator.HEIGHT,
             "fps": ReelGenerator.FPS,
@@ -142,16 +140,12 @@ class MissionExecutor:
                         "attempts": attempt,
                     }
                     execution.update(self._review_metadata())
-
-                    # Media generation is deliberately downstream of validation.
-                    # A failed render fails the task; no broken media is reported as complete.
                     media = self._render_reel(task, result)
                     if media:
                         execution.update(media)
                         result = dict(result)
                         result["media"] = media
                         execution["result"] = result
-
                     execution = self._persist_validated_artifact(task, employee_name, result, validation, execution)
                     task.complete(execution)
                     return execution
@@ -162,14 +156,7 @@ class MissionExecutor:
                 validation = self._exception_validation(employee_name, error)
                 if attempt == self.max_attempts:
                     return self._failure_result(task, employee_name, result, validation, attempt, error)
-        return self._failure_result(
-            task,
-            employee_name,
-            result,
-            validation or {"valid": False, "errors": ["Task produced no result."], "warnings": [], "quality_score": 0},
-            self.max_attempts,
-            last_error,
-        )
+        return self._failure_result(task, employee_name, result, validation or {"valid": False, "errors": ["Task produced no result."], "warnings": [], "quality_score": 0}, self.max_attempts, last_error)
 
     def execute_task(self, task, completed_ids=None):
         completed_ids = completed_ids or set()
@@ -179,14 +166,7 @@ class MissionExecutor:
             validation = {"status": "BLOCKED", "valid": False, "errors": [f"Task dependencies are incomplete: {', '.join(missing)}"], "warnings": [], "quality_score": 0}
             return self._failure_result(task, task.assigned_to, None, validation, 0)
         if task.status in {"Completed", "Failed"}:
-            return {
-                "task_id": task.id,
-                "employee": task.assigned_to,
-                "status": task.status,
-                "result": task.result,
-                "validation": {"valid": False, "errors": [f"Task is already {task.status.lower()} and cannot be re-executed."], "warnings": [], "quality_score": 0},
-                "attempts": 0,
-            }
+            return {"task_id": task.id, "employee": task.assigned_to, "status": task.status, "result": task.result, "validation": {"valid": False, "errors": [f"Task is already {task.status.lower()} and cannot be re-executed."], "warnings": [], "quality_score": 0}, "attempts": 0}
         task.start()
         if task.assigned_to == self.CONTENT_EMPLOYEE:
             return self._execute_employee_task(task, self.CONTENT_EMPLOYEE, self.content_employee, "create_content")
