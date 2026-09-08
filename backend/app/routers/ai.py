@@ -1,50 +1,17 @@
-import json
+from __future__ import annotations
+
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.database import ContentDraft, ErrorEvent, get_db
+from app.database import Approval, ContentDraft, ErrorEvent, get_db
 from app.schemas.prompt import PromptRequest, PromptResponse
 from app.services.ai_brain import AIBrain
+from app.services.structured_output import parse_json_object
 from app.services.validation.output_validator import OutputValidator
 
 router = APIRouter(prefix="/ai", tags=["AI"])
-
-
-def _parse_json_response(raw_response: str) -> dict[str, Any] | None:
-    cleaned = raw_response.strip()
-    if cleaned.startswith("```json"):
-        cleaned = cleaned[7:]
-    elif cleaned.startswith("```"):
-        cleaned = cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-    cleaned = cleaned.strip()
-
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start < 0 or end <= start:
-            return None
-        try:
-            parsed = json.loads(cleaned[start : end + 1])
-        except json.JSONDecodeError:
-            return None
-
-    return parsed if isinstance(parsed, dict) else None
-
-
-def _fallback_content(raw_response: str, request: PromptRequest) -> dict[str, Any]:
-    return {
-        "hook": request.prompt[:120],
-        "script": raw_response.strip(),
-        "caption": raw_response.strip(),
-        "cta": f"Message us to learn more about {request.offer.lower()}.",
-        "hashtags": ["#Hyderabad", "#GymMarketing", "#TrialClass"],
-    }
 
 
 def _render_content(content: dict[str, Any]) -> str:
@@ -98,45 +65,30 @@ async def generate_content(request: PromptRequest, db: Session = Depends(get_db)
     system_prompt, user_prompt = _build_prompts(request)
 
     try:
-        brain = AIBrain()
-        raw_response = brain.think(system_prompt, user_prompt)
+        raw_response = AIBrain().think(system_prompt, user_prompt)
+        content = parse_json_object(raw_response)
+        validation = OutputValidator().validate(content)
     except (ValueError, RuntimeError) as error:
-        db.add(
-            ErrorEvent(
-                severity="warning",
-                component="ai_generation",
-                message=str(error),
-            )
-        )
+        db.add(ErrorEvent(severity="warning", component="ai_generation", message=str(error)[:1500]))
         db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(error),
-        ) from error
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     except Exception as error:
-        db.add(
-            ErrorEvent(
-                severity="error",
-                component="ai_generation",
-                message="Unexpected AI provider error: " + str(error),
-            )
-        )
+        db.add(ErrorEvent(severity="error", component="ai_generation", message="Unexpected AI provider error: " + str(error)[:1200]))
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The AI provider did not complete the request.") from error
+
+    if not validation.get("valid", False):
+        db.add(ErrorEvent(
+            severity="warning",
+            component="ai_output_validation",
+            message="Generated AI content failed schema/claim validation: " + "; ".join(validation.get("errors", []))[:1200],
+        ))
         db.commit()
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="The AI provider did not complete the request.",
-        ) from error
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": "AI output failed CreatorOS validation.", "validation": validation},
+        )
 
-    parsed_content = _parse_json_response(raw_response)
-    required_fields = ("hook", "script", "caption", "cta", "hashtags")
-    content = (
-        parsed_content
-        if parsed_content
-        and all(isinstance(parsed_content.get(field), str) and parsed_content[field].strip() for field in required_fields[:4])
-        and isinstance(parsed_content.get("hashtags"), list)
-        else _fallback_content(raw_response, request)
-    )
-    validation = OutputValidator().validate(content)
     draft = ContentDraft(
         title=str(content.get("hook") or "Untitled local campaign")[:180],
         prompt=request.prompt,
@@ -148,6 +100,14 @@ async def generate_content(request: PromptRequest, db: Session = Depends(get_db)
         action_class="approval_required",
     )
     db.add(draft)
+    db.flush()
+    db.add(Approval(
+        resource_type="content_draft",
+        resource_id=draft.id,
+        status="needs_review",
+        action_class="approval_required",
+        reason="AI-generated content passed validation but requires owner approval before publishing.",
+    ))
     db.commit()
     db.refresh(draft)
 
