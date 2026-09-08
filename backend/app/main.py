@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.database import Approval, ErrorEvent, SessionLocal, init_db
@@ -36,6 +38,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Generated media is local, non-sensitive working output. It is served read-only
+# so the CEO can preview generated Reels in the dashboard without enabling uploads.
+MEDIA_DIR = Path(__file__).resolve().parent.parent / "generated_reels"
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/media/reels", StaticFiles(directory=str(MEDIA_DIR)), name="reel-media")
 
 app.include_router(ai_router)
 app.include_router(operations_router)
@@ -205,7 +213,7 @@ def approve_mission(request: MissionApproval):
     if not request.approved:
         try:
             _record_approval("rejected", "CEO rejected opportunity.")
-        except Exception as error:
+        except Exception:
             db = SessionLocal()
             try:
                 db.add(ErrorEvent(severity="warning", component="mission_approval", message="Could not persist mission rejection."))
