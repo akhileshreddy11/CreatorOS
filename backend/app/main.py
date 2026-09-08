@@ -236,6 +236,14 @@ def approve_mission(request: MissionApproval):
     }
 
 
+@app.get("/missions/latest")
+def get_latest_mission_job():
+    job = jobs.latest("mission")
+    if not job:
+        raise HTTPException(status_code=404, detail="No mission has been started yet.")
+    return job
+
+
 @app.get("/missions/{job_id}")
 def get_mission_job(job_id: str):
     job = jobs.get(job_id)
