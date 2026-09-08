@@ -1,12 +1,10 @@
-from google import genai
+"""Manual Gemini model discovery; not part of the deterministic test suite."""
+
 import os
+
 from dotenv import load_dotenv
+from google import genai
 
-load_dotenv()
-
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
-)
 
 models_to_test = [
     "gemini-2.0-flash",
@@ -17,23 +15,31 @@ models_to_test = [
     "gemini-3.1-flash-lite",
 ]
 
-for model in models_to_test:
 
-    print("\n" + "=" * 60)
-    print("TESTING:", model)
-    print("=" * 60)
+def main():
+    load_dotenv()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
 
-    try:
+    client = genai.Client(api_key=api_key)
 
-        response = client.models.generate_content(
-            model=model,
-            contents="Reply with exactly: MODEL WORKS"
-        )
+    for model in models_to_test:
+        print("\n" + "=" * 60)
+        print("TESTING:", model)
+        print("=" * 60)
 
-        print("SUCCESS:")
-        print(response.text)
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents="Reply with exactly: MODEL WORKS",
+            )
+            print("SUCCESS:")
+            print(response.text)
+        except Exception as error:
+            print("FAILED:")
+            print(error)
 
-    except Exception as error:
 
-        print("FAILED:")
-        print(error)
+if __name__ == "__main__":
+    main()

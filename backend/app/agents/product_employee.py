@@ -1,6 +1,5 @@
-import json
-
 from app.services.ai_brain import AIBrain
+from app.services.structured_output import parse_json_object
 
 
 class ProductEmployee:
@@ -187,33 +186,4 @@ Return only the corrected JSON.
         # PARSE JSON
         # -----------------------------------------
 
-        try:
-
-            return json.loads(response)
-
-        except json.JSONDecodeError:
-
-            cleaned = response.strip()
-
-            if cleaned.startswith("```json"):
-                cleaned = cleaned[7:]
-
-            if cleaned.startswith("```"):
-                cleaned = cleaned[3:]
-
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-
-            cleaned = cleaned.strip()
-
-            try:
-
-                return json.loads(cleaned)
-
-            except json.JSONDecodeError:
-
-                return {
-                    "status": "ERROR",
-                    "message": "Product Employee returned invalid JSON.",
-                    "raw_response": response
-                }
+        return parse_json_object(response)

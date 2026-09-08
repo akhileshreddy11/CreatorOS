@@ -17,9 +17,9 @@ def main():
 
     generator = ReelGenerator()
 
-    output = generator.generate_reel(
+    output = generator.create_reel(
         content,
-        filename="test_creatoros_reel.mp4"
+        output_name="test_creatoros_reel.mp4"
     )
 
     print("\n===== REEL GENERATED =====")

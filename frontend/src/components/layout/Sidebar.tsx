@@ -6,6 +6,7 @@ import { BarChart3, Calendar, ChevronRight, FileText, LayoutDashboard, Settings,
 
 const menuItems = [
   { title: "Command center", href: "/", icon: LayoutDashboard },
+  { title: "COO Morning Brief", href: "/opportunities", icon: Sparkles },
   { title: "AI Studio", href: "/ai-studio", icon: Sparkles },
   { title: "Draft approvals", href: "/drafts", icon: FileText },
   { title: "Prospects", href: "/prospects", icon: Users },

@@ -38,6 +38,6 @@ class Task:
         self.completed_at = datetime.now()
         self.result = result
 
-    def failed(self, reason):
+    def failed(self, reason, result=None):
         self.status = "Failed"
-        self.result = {"reason": reason}
+        self.result = result if result is not None else {"reason": reason}

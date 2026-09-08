@@ -1,6 +1,5 @@
-import json
-
 from app.services.ai_brain import AIBrain
+from app.services.structured_output import parse_json_object
 
 
 class ContentEmployee:
@@ -98,25 +97,9 @@ Do NOT repeat the problems identified above.
 Return only the corrected JSON.
 """
 
-        try:
+        response = self.brain.think(
+            system_prompt,
+            user_prompt
+        )
 
-            response = self.brain.think(
-                system_prompt,
-                user_prompt
-            )
-
-            try:
-
-                result = json.loads(response)
-
-            except json.JSONDecodeError:
-
-                result = {
-                    "raw_content": response
-                }
-
-            return result
-
-        except Exception as error:
-
-            raise error
+        return parse_json_object(response)

@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 from app.agents.trend_hunter import TrendHunter
@@ -6,26 +7,35 @@ from app.agents.niche_researcher import NicheResearcher
 from app.agents.niche_ranking import NicheRanking
 from app.agents.opportunity_generator import OpportunityGenerator
 from app.services.ai_brain import AIBrain
+from app.services.validation.opportunity_safety_gate import OpportunitySafetyGate
 
 
 class BusinessPartner:
     """
-    CreatorOS COO
+    CreatorOS COO / Business Partner.
 
-    Responsibilities:
-    - Understand the business
-    - Discover trends
-    - Research profitable niches
-    - Rank niches
-    - Generate business opportunities
-    - Select the strongest opportunity
-    - Evaluate business potential
-    - Recommend the best strategy
-    - Wait for CEO approval
+    Pipeline:
+
+        Trend Hunter
+             ↓
+        Niche Researcher
+             ↓
+        Niche Ranking
+             ↓
+        Opportunity Generator
+             ↓
+        COO Evaluation
+             ↓
+        CEO Approval
+
+    This class deliberately keeps the intelligence pipeline sequential
+    because each stage depends on the result of the previous stage.
+
+    Every stage is logged with timing information so a slow or failed
+    intelligence employee can be identified immediately.
     """
 
     def __init__(self):
-
         self.memory_path = (
             Path(__file__).parent.parent
             / "memory"
@@ -34,26 +44,169 @@ class BusinessPartner:
 
         self.business = self.load_business_profile()
 
-        # Intelligence employees
+        print("[COO] Initializing intelligence employees...")
+
         self.trend_hunter = TrendHunter()
         self.niche_researcher = NicheResearcher()
         self.niche_ranking = NicheRanking()
         self.opportunity_generator = OpportunityGenerator()
 
-        # AI brain
         self.brain = AIBrain()
+        self.safety_gate = OpportunitySafetyGate()
+
+        print("[COO] Business Partner ready.")
+
+    # ============================================================
+    # BUSINESS PROFILE
+    # ============================================================
 
     def load_business_profile(self):
+        if not self.memory_path.exists():
+            raise FileNotFoundError(
+                f"Business profile not found: {self.memory_path}"
+            )
 
         with open(
             self.memory_path,
             "r",
-            encoding="utf-8"
+            encoding="utf-8",
         ) as file:
-
             return json.load(file)
 
+    # ============================================================
+    # STAGE LOGGER
+    # ============================================================
+
+    @staticmethod
+    def _stage_start(name):
+        print()
+        print("=" * 60)
+        print(f"[COO] STARTING: {name}")
+        print("=" * 60)
+
+        return time.perf_counter()
+
+    @staticmethod
+    def _stage_complete(name, started_at):
+        elapsed = time.perf_counter() - started_at
+
+        print()
+        print(
+            f"[COO] COMPLETED: {name} "
+            f"in {elapsed:.2f}s"
+        )
+
+        return elapsed
+
+    @staticmethod
+    def _stage_failed(name, started_at, error):
+        elapsed = time.perf_counter() - started_at
+
+        print()
+        print(
+            f"[COO] FAILED: {name} "
+            f"after {elapsed:.2f}s"
+        )
+
+        print(
+            f"[COO] ERROR: {str(error)[:1000]}"
+        )
+
+    # ============================================================
+    # JSON PARSER
+    # ============================================================
+
+    @staticmethod
+    def _parse_json(response):
+        if isinstance(response, dict):
+            return response
+
+        if response is None:
+            return {
+                "status": "FAILED",
+                "error": "AI returned no response.",
+            }
+
+        cleaned = str(response).strip()
+
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+
+        elif cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+
+        cleaned = cleaned.strip()
+
+        try:
+            return json.loads(cleaned)
+
+        except json.JSONDecodeError:
+            return {
+                "status": "FAILED",
+                "error": "AI returned invalid JSON.",
+                "raw_response": response,
+            }
+
+    # ============================================================
+    # SAFE FAILURE RESPONSE
+    # ============================================================
+
+    def _failure_response(
+        self,
+        business,
+        goals,
+        stage,
+        error,
+    ):
+        return {
+            "greeting": "Good Morning Boss 👋",
+            "business": business.get(
+                "name",
+                "CreatorOS",
+            ),
+            "monthly_goal": goals.get(
+                "monthly_income",
+                self.business.get(
+                    "operating_configuration",
+                    {},
+                ).get(
+                    "primary_kpi",
+                    "trial_class_enquiries",
+                ),
+            ),
+            "platform": goals.get(
+                "primary_platform",
+                self.business.get(
+                    "operating_configuration",
+                    {},
+                ).get(
+                    "content_platforms",
+                    ["Instagram"],
+                )[0],
+            ),
+            "automation": goals.get(
+                "automation_level",
+                "Approval-gated",
+            ),
+            "status": "FAILED",
+            "failed_stage": stage,
+            "reason": str(error)[:1500],
+        }
+
+    # ============================================================
+    # COO EVALUATION
+    # ============================================================
+
     def evaluate_opportunity(self, opportunity):
+        """
+        Evaluate the selected opportunity using the COO AI brain.
+        """
+
+        stage = "COO Evaluation"
+        started_at = self._stage_start(stage)
 
         system_prompt = """
 You are the Chief Operating Officer of CreatorOS.
@@ -61,9 +214,9 @@ You are the Chief Operating Officer of CreatorOS.
 You are evaluating a business opportunity selected by the
 CreatorOS intelligence pipeline.
 
-Your job is to think like a practical business executive.
+Think like a practical business executive.
 
-Evaluate the opportunity based on:
+Evaluate:
 
 1. Audience fit
 2. Content potential
@@ -80,7 +233,7 @@ IMPORTANT:
 - Be realistic and conservative.
 - Return ONLY valid JSON.
 - Do not use markdown.
-- Do not include ```json.
+- Do not use code fences.
 """
 
         user_prompt = f"""
@@ -118,61 +271,218 @@ REVIEW
 REJECT
 """
 
-        response = self.brain.think(
-            system_prompt,
-            user_prompt
-        )
+        try:
+            response = self.brain.think(
+                system_prompt,
+                user_prompt,
+            )
 
-        return self._parse_json(response)
+            result = self._parse_json(response)
+
+            self._stage_complete(
+                stage,
+                started_at,
+            )
+
+            return result
+
+        except Exception as error:
+            self._stage_failed(
+                stage,
+                started_at,
+                error,
+            )
+
+            return {
+                "status": "FAILED",
+                "recommendation": "REVIEW",
+                "error": str(error)[:1500],
+            }
+
+    # ============================================================
+    # MORNING BRIEF
+    # ============================================================
 
     def morning_brief(self):
+        """
+        Run the complete CreatorOS intelligence pipeline.
+        """
 
-        business = self.business["business"]
-        goals = self.business["goals"]
+        total_started_at = time.perf_counter()
 
-        # --------------------------------------------------
-        # STEP 1: Discover current opportunity signals
-        # --------------------------------------------------
-
-        trend_opportunity = self.trend_hunter.analyze()
-
-        # --------------------------------------------------
-        # STEP 2: Research profitable niches
-        # --------------------------------------------------
-
-        niche_research = self.niche_researcher.research()
-
-        # --------------------------------------------------
-        # STEP 3: Rank possible niches
-        # --------------------------------------------------
-
-        niche_ranking = self.niche_ranking.rank(
-            niche_research
+        business = self.business.get(
+            "business",
+            {},
         )
 
-        # --------------------------------------------------
-        # STEP 4: Select the winning niche
-        # --------------------------------------------------
+        goals = self.business.get(
+            "goals",
+            {},
+        )
+
+        print()
+        print()
+        print("#" * 70)
+        print("# CREATOROS COO MORNING BRIEF")
+        print("#" * 70)
+
+        # ========================================================
+        # STEP 1 — TREND HUNTER
+        # ========================================================
+
+        stage = "Trend Hunter"
+        started_at = self._stage_start(stage)
+
+        try:
+            trend_opportunity = self.trend_hunter.analyze()
+
+            self._stage_complete(
+                stage,
+                started_at,
+            )
+
+        except Exception as error:
+            self._stage_failed(
+                stage,
+                started_at,
+                error,
+            )
+
+            return self._failure_response(
+                business,
+                goals,
+                stage,
+                error,
+            )
+
+        # ========================================================
+        # STEP 2 — NICHE RESEARCH
+        # ========================================================
+
+        stage = "Niche Researcher"
+        started_at = self._stage_start(stage)
+
+        try:
+            niche_research = self.niche_researcher.research()
+
+            self._stage_complete(
+                stage,
+                started_at,
+            )
+
+        except Exception as error:
+            self._stage_failed(
+                stage,
+                started_at,
+                error,
+            )
+
+            return self._failure_response(
+                business,
+                goals,
+                stage,
+                error,
+            )
+
+        # ========================================================
+        # STEP 3 — NICHE RANKING
+        # ========================================================
+
+        stage = "Niche Ranking"
+        started_at = self._stage_start(stage)
+
+        try:
+            niche_ranking = self.niche_ranking.rank(
+                niche_research
+            )
+
+            self._stage_complete(
+                stage,
+                started_at,
+            )
+
+        except Exception as error:
+            self._stage_failed(
+                stage,
+                started_at,
+                error,
+            )
+
+            return self._failure_response(
+                business,
+                goals,
+                stage,
+                error,
+            )
+
+        # ========================================================
+        # STEP 4 — SELECT NICHE
+        # ========================================================
 
         best_niche = niche_ranking.get(
             "best_niche"
         )
 
         if not best_niche:
-
             best_niche = niche_research
 
-        # --------------------------------------------------
-        # STEP 5: Generate business opportunities
-        # --------------------------------------------------
+        if not best_niche:
+            return self._failure_response(
+                business,
+                goals,
+                "Niche Selection",
+                "No winning niche was returned.",
+            )
 
-        opportunity_data = self.opportunity_generator.generate(
-            best_niche
+        print()
+        print(
+            "[COO] SELECTED NICHE:"
         )
 
-        # --------------------------------------------------
-        # STEP 6: Select strongest opportunity
-        # --------------------------------------------------
+        print(
+            json.dumps(
+                best_niche,
+                indent=2,
+                ensure_ascii=False,
+            )[:3000]
+        )
+
+        # ========================================================
+        # STEP 5 — OPPORTUNITY GENERATION
+        # ========================================================
+
+        stage = "Opportunity Generator"
+        started_at = self._stage_start(stage)
+
+        try:
+            opportunity_data = (
+                self.opportunity_generator.generate(
+                    best_niche
+                )
+            )
+
+            self._stage_complete(
+                stage,
+                started_at,
+            )
+
+        except Exception as error:
+            self._stage_failed(
+                stage,
+                started_at,
+                error,
+            )
+
+            return self._failure_response(
+                business,
+                goals,
+                stage,
+                error,
+            )
+
+        # ========================================================
+        # STEP 6 — SELECT OPPORTUNITY
+        # ========================================================
 
         best_opportunity = opportunity_data.get(
             "best_opportunity"
@@ -180,71 +490,103 @@ REJECT
 
         if not best_opportunity:
 
-            return {
-                "greeting": "Good Morning Boss 👋",
-                "business": business["name"],
-                "monthly_goal": goals.get(
-                    "monthly_income",
-                    self.business.get("operating_configuration", {}).get(
-                        "primary_kpi",
-                        "trial_class_enquiries"
-                    )
-                ),
-                "platform": goals.get(
-                    "primary_platform",
-                    self.business.get("operating_configuration", {}).get(
-                        "content_platforms",
-                        ["Instagram"]
-                    )[0]
-                ),
-                "automation": goals.get(
-                    "automation_level",
-                    "Approval-gated"
-                ),
-                "status": "FAILED",
-                "reason": (
+            return self._failure_response(
+                business,
+                goals,
+                "Opportunity Selection",
+                (
                     "Opportunity Generator did not return "
                     "a best opportunity."
-                )
-            }
+                ),
+            )
 
-        # --------------------------------------------------
-        # STEP 7: COO evaluates winning opportunity
-        # --------------------------------------------------
+        print()
+        print(
+            "[COO] SELECTED OPPORTUNITY:"
+        )
+
+        print(
+            json.dumps(
+                best_opportunity,
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+
+        # STEP 7 — COO EVALUATION
+        # ========================================================
 
         evaluation = self.evaluate_opportunity(
             best_opportunity
         )
 
-        # --------------------------------------------------
-        # FINAL COO REPORT
-        # --------------------------------------------------
+        # ========================================================
+        # STEP 8 — OPPORTUNITY SAFETY GATE
+        # ========================================================
+
+        safety_review = self.safety_gate.inspect(
+            opportunity=best_opportunity,
+            deliverables=evaluation.get("proposed_deliverables", []),
+        )
+
+        print()
+        print(f"[COO] SAFETY GATE STATUS: {safety_review['status']} (Score: {safety_review['safety_score']}/100)")
+        if safety_review.get("warnings"):
+            for w in safety_review["warnings"]:
+                print(f"[COO] SAFETY WARNING: {w}")
+
+        # ========================================================
+        # FINAL REPORT
+        # ========================================================
+
+        total_elapsed = (
+            time.perf_counter()
+            - total_started_at
+        )
+
+        print()
+        print("#" * 70)
+        print(
+            f"# COO PIPELINE COMPLETE "
+            f"IN {total_elapsed:.2f}s"
+        )
+        print("#" * 70)
+
+        status = "NEEDS_REVIEW" if safety_review.get("status") == "NEEDS_REVIEW" else "Awaiting CEO Approval"
 
         return {
-
             "greeting": "Good Morning Boss 👋",
 
-            "business": business["name"],
+            "business": business.get(
+                "name",
+                "CreatorOS",
+            ),
 
             "monthly_goal": goals.get(
                 "monthly_income",
-                self.business.get("operating_configuration", {}).get(
+                self.business.get(
+                    "operating_configuration",
+                    {},
+                ).get(
                     "primary_kpi",
-                    "trial_class_enquiries"
-                )
+                    "trial_class_enquiries",
+                ),
             ),
 
             "platform": goals.get(
                 "primary_platform",
-                self.business.get("operating_configuration", {}).get(
+                self.business.get(
+                    "operating_configuration",
+                    {},
+                ).get(
                     "content_platforms",
-                    ["Instagram"]
-                )[0]
+                    ["Instagram"],
+                )[0],
             ),
 
             "automation": goals.get(
                 "automation_level",
-                "Approval-gated"
+                "Approval-gated",
             ),
 
             "trend_opportunity": trend_opportunity,
@@ -261,34 +603,12 @@ REJECT
 
             "coo_evaluation": evaluation,
 
-            "status": "Awaiting CEO Approval"
+            "safety_review": safety_review,
+
+            "status": status,
+
+            "pipeline_time_seconds": round(
+                total_elapsed,
+                2,
+            ),
         }
-
-    def _parse_json(self, response):
-
-        if isinstance(response, dict):
-            return response
-
-        cleaned = response.strip()
-
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-
-        elif cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-
-        cleaned = cleaned.strip()
-
-        try:
-
-            return json.loads(cleaned)
-
-        except json.JSONDecodeError:
-
-            return {
-                "error": "COO returned invalid JSON",
-                "raw_response": response
-            }
