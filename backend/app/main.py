@@ -34,6 +34,9 @@ frontend_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,
+    # Next.js may move to the next free development port (3001, 3002, ...).
+    # Keep localhost development origins safe without requiring a config edit.
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
