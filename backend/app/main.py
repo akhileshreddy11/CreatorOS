@@ -1,41 +1,25 @@
+from __future__ import annotations
+
 import os
-import threading
-import time
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.database import init_db
+from app.database import Approval, ErrorEvent, SessionLocal, init_db
 from app.routers.ai import router as ai_router
 from app.routers.operations import router as operations_router
-
-
-# ============================================================
-# DATABASE
-# ============================================================
+from app.services.job_manager import JobManager
+from app.services.validation.opportunity_safety_gate import OpportunitySafetyGate
 
 init_db()
 
-
-# ============================================================
-# FASTAPI APPLICATION
-# ============================================================
-
 app = FastAPI(
     title="CreatorOS API",
-    version="2.0.0",
-    description=(
-        "Approval-gated AI operating system "
-        "for local-business lead generation."
-    ),
+    version="2.1.0",
+    description="Approval-gated AI operating system for local-business lead generation.",
 )
-
-
-# ============================================================
-# CORS
-# ============================================================
 
 frontend_origins = [
     origin.strip()
@@ -45,7 +29,6 @@ frontend_origins = [
     ).split(",")
     if origin.strip()
 ]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,
@@ -54,42 +37,93 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ============================================================
-# ROUTERS
-# ============================================================
-
 app.include_router(ai_router)
 app.include_router(operations_router)
 
+jobs = JobManager()
 
-# ============================================================
-# REQUEST MODELS
-# ============================================================
 
 class MissionApproval(BaseModel):
     approved: bool
     opportunity: dict | None = None
 
 
-# ============================================================
-# MORNING BRIEF STATE
-# ============================================================
+def _default_opportunity() -> dict:
+    return {
+        "topic": "Hyderabad gym trial-class enquiry campaign",
+        "problem": "Local gym prospects need a clear reason to enquire and an easy next step.",
+        "audience": ["Hyderabad gym owners", "beginners looking for a nearby class"],
+        "strategy": "Create useful local-language short videos and route every CTA through an owner-approved follow-up.",
+        "recommended_content": [
+            "What to expect in your first gym trial class",
+            "Three questions to ask before joining a Hyderabad gym",
+            "A transparent introductory offer with a trial enquiry CTA",
+        ],
+        "product_idea": "",
+    }
 
-morning_brief_state = {
-    "status": "NOT_STARTED",
-    "result": None,
-    "error": None,
-    "started_at": None,
-    "completed_at": None,
-}
 
-morning_brief_lock = threading.Lock()
+def _run_brief(job_id: str):
+    from app.agents.business_partner import BusinessPartner
+
+    jobs.update(job_id, stage="Initializing COO", progress=5)
+    result = BusinessPartner().morning_brief()
+    jobs.update(job_id, stage="Preparing CEO review", progress=95)
+    return result
 
 
-# ============================================================
-# ROOT
-# ============================================================
+def _run_mission(job_id: str, opportunity: dict):
+    from app.agents.mission_planner import MissionPlanner
+    from app.services.mission_executor import MissionExecutor
+
+    jobs.update(job_id, stage="Safety review", progress=10)
+    safety_review = OpportunitySafetyGate().inspect(opportunity)
+    if safety_review.get("status") != "SAFE":
+        raise ValueError("Opportunity did not pass the safety gate and cannot be executed.")
+
+    jobs.update(job_id, stage="Planning mission", progress=25)
+    planner = MissionPlanner()
+    mission = planner.create_mission(opportunity)
+
+    jobs.update(job_id, stage="Executing approved tasks", progress=40)
+    results = MissionExecutor().execute_mission(planner.task_manager.tasks)
+    statuses = {result["task_id"]: result["status"] for result in results}
+    for task in mission["tasks"]:
+        task["status"] = statuses.get(task["id"], task["status"])
+
+    mission["execution_status"] = (
+        "COMPLETED"
+        if results and all(result["status"] == "Completed" for result in results)
+        else "FAILED"
+    )
+    jobs.update(job_id, stage="Recording approval", progress=90)
+    return {
+        "status": "APPROVED",
+        "message": "Mission executed. Generated artifacts remain approval-gated and require owner review.",
+        "mission": mission,
+        "execution_results": results,
+        "safety_review": safety_review,
+    }
+
+
+def _record_approval(status: str, reason: str) -> None:
+    db = SessionLocal()
+    try:
+        db.add(
+            Approval(
+                resource_type="mission_opportunity",
+                resource_id=0,
+                status=status,
+                action_class="approval_required",
+                reason=reason,
+                reviewed_by="owner",
+                reviewed_at=datetime.now(timezone.utc),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
 
 @app.get("/")
 def root():
@@ -100,429 +134,111 @@ def root():
     }
 
 
-# ============================================================
-# HEALTH
-# ============================================================
-
 @app.get("/health")
 def health():
-    return {
-        "status": "healthy",
-        "database": "ready",
-    }
-
-
-# ============================================================
-# BACKGROUND MORNING BRIEF WORKER
-# ============================================================
-
-def run_morning_brief():
-    """
-    Runs the expensive CreatorOS COO pipeline in a background
-    thread so the HTTP request does not remain open while
-    multiple Gemini requests are executing.
-    """
-
     try:
-        from app.agents.business_partner import BusinessPartner
+        db = SessionLocal()
+        db.execute(__import__("sqlalchemy").text("SELECT 1"))
+        db.close()
+        return {"status": "healthy", "database": "ready"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="CreatorOS database is unavailable.")
 
-        print()
-        print("=" * 70)
-        print("[COO] MORNING BRIEF STARTED")
-        print("=" * 70)
-
-        started = time.perf_counter()
-
-        with morning_brief_lock:
-            morning_brief_state["status"] = "RUNNING"
-            morning_brief_state["result"] = None
-            morning_brief_state["error"] = None
-            morning_brief_state["started_at"] = (
-                datetime.now(timezone.utc).isoformat()
-            )
-
-        # ----------------------------------------------------
-        # RUN COMPLETE COO PIPELINE
-        # ----------------------------------------------------
-
-        result = BusinessPartner().morning_brief()
-
-        elapsed = time.perf_counter() - started
-
-        # ----------------------------------------------------
-        # STORE RESULT
-        # ----------------------------------------------------
-
-        with morning_brief_lock:
-            morning_brief_state["status"] = "READY"
-            morning_brief_state["result"] = result
-            morning_brief_state["completed_at"] = (
-                datetime.now(timezone.utc).isoformat()
-            )
-
-        print(
-            f"[COO] MORNING BRIEF COMPLETED "
-            f"in {elapsed:.2f}s"
-        )
-
-        print("=" * 70)
-        print("[COO] RESULT READY FOR OWNER REVIEW")
-        print("=" * 70)
-        print()
-
-    except Exception as error:
-
-        error_message = str(error)
-
-        print()
-        print("=" * 70)
-        print("[COO] MORNING BRIEF FAILED")
-        print(f"[COO] {error_message}")
-        print("=" * 70)
-        print()
-
-        with morning_brief_lock:
-            morning_brief_state["status"] = "FAILED"
-            morning_brief_state["error"] = error_message
-            morning_brief_state["completed_at"] = (
-                datetime.now(timezone.utc).isoformat()
-            )
-
-
-# ============================================================
-# MORNING BRIEF
-# ============================================================
 
 @app.get("/morning-brief")
-def morning_brief():
-
-    with morning_brief_lock:
-
-        status = morning_brief_state["status"]
-
-        # ----------------------------------------------------
-        # ALREADY READY
-        # ----------------------------------------------------
-
-        if status == "READY":
-
-            return {
-                "status": "READY",
-                "message": "Morning brief ready.",
-                "brief": morning_brief_state["result"],
-                "started_at": morning_brief_state["started_at"],
-                "completed_at": morning_brief_state["completed_at"],
-            }
-
-        # ----------------------------------------------------
-        # CURRENTLY RUNNING
-        # ----------------------------------------------------
-
-        if status == "RUNNING":
-
-            return {
-                "status": "RUNNING",
-                "message": (
-                    "CreatorOS COO is currently preparing "
-                    "the morning brief."
-                ),
-                "started_at": morning_brief_state["started_at"],
-            }
-
-        # ----------------------------------------------------
-        # PREVIOUSLY FAILED
-        # ----------------------------------------------------
-
-        if status == "FAILED":
-
-            return {
-                "status": "FAILED",
-                "message": "Morning brief generation failed.",
-                "error": morning_brief_state["error"],
-            }
-
-        # ----------------------------------------------------
-        # FIRST EXECUTION
-        # ----------------------------------------------------
-
-        morning_brief_state["status"] = "RUNNING"
-        morning_brief_state["result"] = None
-        morning_brief_state["error"] = None
-        morning_brief_state["started_at"] = (
-            datetime.now(timezone.utc).isoformat()
-        )
-        morning_brief_state["completed_at"] = None
-
-    # --------------------------------------------------------
-    # START BACKGROUND WORKER
-    # --------------------------------------------------------
-
-    worker = threading.Thread(
-        target=run_morning_brief,
-        daemon=True,
-        name="CreatorOS-Morning-Brief",
-    )
-
-    worker.start()
-
-    return {
-        "status": "STARTED",
-        "message": (
-            "CreatorOS COO has started preparing "
-            "the morning brief."
-        ),
-        "started_at": morning_brief_state["started_at"],
+def get_morning_brief():
+    job = jobs.latest("morning_brief")
+    if not job:
+        return {"status": "NOT_STARTED", "message": "No morning brief has been generated yet."}
+    response = {
+        "status": {
+            "PENDING": "STARTED",
+            "RUNNING": "RUNNING",
+            "COMPLETED": "READY",
+            "FAILED": "FAILED",
+        }.get(job["status"], job["status"]),
+        "message": job["stage"],
+        "job_id": job["job_id"],
+        "progress": job["progress"],
+        "stage": job["stage"],
+        "started_at": job["started_at"],
+        "completed_at": job["completed_at"],
     }
+    if job["status"] == "COMPLETED":
+        response["brief"] = job["result"]
+    if job["status"] == "FAILED":
+        response["error"] = job["error"]
+    return response
 
 
-# ============================================================
-# REFRESH MORNING BRIEF
-# ============================================================
+@app.get("/morning-brief/{job_id}")
+def get_morning_brief_job(job_id: str):
+    job = jobs.get(job_id)
+    if not job or job["type"] != "morning_brief":
+        raise HTTPException(status_code=404, detail="Morning brief job not found.")
+    return job
+
 
 @app.post("/morning-brief/refresh")
 def refresh_morning_brief():
-
-    with morning_brief_lock:
-
-        if morning_brief_state["status"] == "RUNNING":
-
-            return {
-                "status": "RUNNING",
-                "message": (
-                    "A morning brief is already being generated."
-                ),
-            }
-
-        morning_brief_state["status"] = "RUNNING"
-        morning_brief_state["result"] = None
-        morning_brief_state["error"] = None
-        morning_brief_state["started_at"] = (
-            datetime.now(timezone.utc).isoformat()
-        )
-        morning_brief_state["completed_at"] = None
-
-    worker = threading.Thread(
-        target=run_morning_brief,
-        daemon=True,
-        name="CreatorOS-Morning-Brief-Refresh",
-    )
-
-    worker.start()
-
-    return {
-        "status": "STARTED",
-        "message": "Morning brief refresh started.",
-        "started_at": morning_brief_state["started_at"],
-    }
+    job = jobs.create("morning_brief", _run_brief)
+    if job["status"] in {"PENDING", "RUNNING"}:
+        return {
+            "status": "STARTED" if job["status"] == "PENDING" else "RUNNING",
+            "message": "CreatorOS COO is preparing the morning brief.",
+            "job_id": job["job_id"],
+            "progress": job["progress"],
+            "stage": job["stage"],
+        }
+    return job
 
 
-# ============================================================
-# APPROVE MISSION
-# ============================================================
+@app.post("/morning-brief")
+def start_morning_brief():
+    return refresh_morning_brief()
+
 
 @app.post("/approve-mission")
 def approve_mission(request: MissionApproval):
-
-    # --------------------------------------------------------
-    # OWNER REJECTED
-    # --------------------------------------------------------
+    opportunity = request.opportunity or _default_opportunity()
 
     if not request.approved:
-        from app.database import Approval, SessionLocal
-
-        db = SessionLocal()
         try:
-            db.add(
-                Approval(
-                    resource_type="mission_opportunity",
-                    resource_id=0,
-                    status="rejected",
-                    action_class="approval_required",
-                    reason="CEO rejected opportunity.",
-                    reviewed_by="owner",
-                    reviewed_at=datetime.now(timezone.utc),
-                )
-            )
-            db.commit()
-        except Exception as db_err:
-            print(f"[MISSION] Failed to record rejection approval: {db_err}")
-            db.rollback()
-        finally:
-            db.close()
+            _record_approval("rejected", "CEO rejected opportunity.")
+        except Exception as error:
+            db = SessionLocal()
+            try:
+                db.add(ErrorEvent(severity="warning", component="mission_approval", message="Could not persist mission rejection."))
+                db.commit()
+            finally:
+                db.close()
+        return {"status": "REJECTED", "message": "Mission rejected by owner.", "next_step": "Review another opportunity."}
 
-        return {
-            "status": "REJECTED",
-            "message": "Mission rejected by owner.",
-            "next_step": "Review another opportunity.",
-        }
-
-    # --------------------------------------------------------
-    # DEFAULT OPPORTUNITY
-    # --------------------------------------------------------
-
-    opportunity = request.opportunity or {
-        "topic": (
-            "Hyderabad gym trial-class enquiry campaign"
-        ),
-        "problem": (
-            "Local gym prospects need a clear reason "
-            "to enquire and an easy next step."
-        ),
-        "audience": [
-            "Hyderabad gym owners",
-            "beginners looking for a nearby class",
-        ],
-        "strategy": (
-            "Create useful local-language short videos "
-            "and route every CTA through an owner-approved "
-            "follow-up."
-        ),
-        "recommended_content": [
-            (
-                "What to expect in your first gym "
-                "trial class"
-            ),
-            (
-                "Three questions to ask before joining "
-                "a Hyderabad gym"
-            ),
-            (
-                "A transparent introductory offer "
-                "with a trial enquiry CTA"
-            ),
-        ],
-        "product_idea": "",
-    }
-
-    # --------------------------------------------------------
-    # SAFETY INSPECTION
-    # --------------------------------------------------------
-
-    from app.services.validation.opportunity_safety_gate import OpportunitySafetyGate
     safety_review = OpportunitySafetyGate().inspect(opportunity)
-
-    # --------------------------------------------------------
-    # EXECUTE MISSION
-    # --------------------------------------------------------
+    if safety_review.get("status") != "SAFE":
+        raise HTTPException(
+            status_code=409,
+            detail="Mission blocked by the opportunity safety gate; review the opportunity before approval.",
+        )
 
     try:
-
-        from app.agents.mission_planner import MissionPlanner
-        from app.database import Approval, SessionLocal
-        from app.services.mission_executor import MissionExecutor
-
-        print()
-        print("=" * 70)
-        print("[MISSION] CREATING MISSION")
-        print("=" * 70)
-
-        planner = MissionPlanner()
-
-        mission = planner.create_mission(
-            opportunity
-        )
-
-        print(
-            f"[MISSION] Created "
-            f"{len(planner.task_manager.tasks)} tasks."
-        )
-
-        print("[MISSION] Starting Mission Executor...")
-
-        execution_results = (
-            MissionExecutor().execute_mission(
-                planner.task_manager.tasks
-            )
-        )
-
-        # ----------------------------------------------------
-        # UPDATE TASK STATUSES
-        # ----------------------------------------------------
-
-        task_statuses = {
-            result["task_id"]: result["status"]
-            for result in execution_results
-        }
-
-        for task in mission["tasks"]:
-
-            task["status"] = task_statuses.get(
-                task["id"],
-                task["status"],
-            )
-
-        # ----------------------------------------------------
-        # DETERMINE MISSION STATUS
-        # ----------------------------------------------------
-
-        mission["execution_status"] = (
-            "COMPLETED"
-            if execution_results
-            and all(
-                result["status"] == "Completed"
-                for result in execution_results
-            )
-            else "FAILED"
-        )
-
-        # ----------------------------------------------------
-        # RECORD APPROVAL IN DB
-        # ----------------------------------------------------
-
-        db = SessionLocal()
-        try:
-            db.add(
-                Approval(
-                    resource_type="mission_opportunity",
-                    resource_id=0,
-                    status="approved",
-                    action_class="approval_required",
-                    reason=f"CEO approved opportunity: {opportunity.get('topic', 'Opportunity')}",
-                    reviewed_by="owner",
-                    reviewed_at=datetime.now(timezone.utc),
-                )
-            )
-            db.commit()
-        except Exception as db_err:
-            print(f"[MISSION] Failed to record approval in database: {db_err}")
-            db.rollback()
-        finally:
-            db.close()
-
-        print(
-            f"[MISSION] Execution status: "
-            f"{mission['execution_status']}"
-        )
-
-        # ----------------------------------------------------
-        # RETURN RESULT
-        # ----------------------------------------------------
-
-        return {
-            "status": "APPROVED",
-            "message": (
-                "Mission executed. Generated artifacts "
-                "remain approval-gated and require "
-                "owner review."
-            ),
-            "mission": mission,
-            "execution_results": execution_results,
-            "safety_review": safety_review,
-        }
-
+        _record_approval("approved", f"CEO approved opportunity: {opportunity.get('topic', 'Opportunity')}")
     except Exception as error:
+        raise HTTPException(status_code=503, detail="Mission approval could not be persisted safely.") from error
 
-        print()
-        print(
-            "[MISSION] ERROR:",
-            str(error),
-        )
-        print()
+    job = jobs.create("mission", lambda job_id: _run_mission(job_id, opportunity))
+    return {
+        "status": "APPROVED",
+        "message": "Mission approval recorded. Execution has started in the background; artifacts remain approval-gated.",
+        "job_id": job["job_id"],
+        "execution_status": job["status"],
+        "safety_review": safety_review,
+    }
 
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Mission execution could not be "
-                "started safely."
-            ),
-        ) from error
+
+@app.get("/missions/{job_id}")
+def get_mission_job(job_id: str):
+    job = jobs.get(job_id)
+    if not job or job["type"] != "mission":
+        raise HTTPException(status_code=404, detail="Mission job not found.")
+    return job
