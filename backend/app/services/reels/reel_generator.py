@@ -30,7 +30,6 @@ class ReelGenerator:
         if not text:
             return []
 
-        # Preserve deliberate line breaks, then split long lines into readable scenes.
         raw_parts = []
         for line in text.split("\n"):
             line = line.strip()
@@ -97,6 +96,8 @@ class ReelGenerator:
             language=language,
             output_name=audio_name,
         )
+        print(f"[Reel Generator] Voice ready: {audio_path}", flush=True)
+        print("[Reel Generator] Loading narration audio...", flush=True)
         audio = AudioFileClip(str(audio_path))
         scenes = []
         final_video = None
@@ -105,11 +106,14 @@ class ReelGenerator:
             duration = float(audio.duration or 0)
             if duration <= 0:
                 raise ValueError("Generated narration has no usable duration.")
+            print(f"[Reel Generator] Narration duration: {duration:.2f}s", flush=True)
 
             scene_texts = self._build_scene_texts(content)
             durations = self._calculate_scene_durations(scene_texts, duration)
+            print(f"[Reel Generator] Building {len(scene_texts)} visual scenes...", flush=True)
 
             for index, (text, scene_duration) in enumerate(zip(scene_texts, durations)):
+                print(f"[Reel Generator] Scene {index + 1}/{len(scene_texts)}: {scene_duration:.2f}s", flush=True)
                 scene = self.visual_engine.create_scene(
                     text=text,
                     duration=max(scene_duration, 0.05),
@@ -120,22 +124,25 @@ class ReelGenerator:
             if not scenes:
                 raise RuntimeError("Reel generation produced no scenes.")
 
-            # Concatenation avoids fragile manual start-time compositing and guarantees
-            # every scene contributes to the final timeline.
+            print("[Reel Generator] Combining scenes...", flush=True)
             final_video = concatenate_videoclips(scenes, method="compose")
             final_video = final_video.with_duration(duration).with_audio(audio)
+            print(f"[Reel Generator] Rendering {self.WIDTH}x{self.HEIGHT} @ {self.FPS}fps...", flush=True)
             final_video.write_videofile(
                 str(output_path),
                 fps=self.FPS,
                 codec="libx264",
                 audio_codec="aac",
                 audio=True,
-                logger=None,
+                preset="ultrafast",
+                threads=4,
+                logger="bar",
             )
 
             if not output_path.exists() or output_path.stat().st_size == 0:
                 raise RuntimeError("Reel render completed without a valid MP4 file.")
 
+            print(f"[Reel Generator] Reel saved: {output_path} ({output_path.stat().st_size} bytes)", flush=True)
             return str(output_path)
         finally:
             if final_video is not None:
