@@ -1,0 +1,30 @@
+import Link from "next/link";
+import { ArrowRight, Sparkles, TrendingUp } from "lucide-react";
+
+export default function HeroActions() {
+  return (
+    <div className="mt-8 flex flex-wrap gap-4">
+      <Link
+        href="/opportunities"
+        className="inline-flex h-14 items-center rounded-2xl bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 px-7 font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:scale-[1.02]"
+      >
+        <Sparkles className="mr-2 h-5 w-5" />
+        COO Morning Brief
+      </Link>
+      <Link
+        href="/ai-studio"
+        className="inline-flex h-14 items-center rounded-2xl border border-zinc-700 bg-zinc-900 px-7 font-semibold text-white transition hover:bg-zinc-800"
+      >
+        <TrendingUp className="mr-2 h-5 w-5 text-indigo-400" />
+        AI Studio
+      </Link>
+      <Link
+        href="/drafts"
+        className="inline-flex h-14 items-center rounded-2xl border border-zinc-800 bg-zinc-950 px-6 font-semibold text-zinc-300 transition hover:bg-zinc-900 hover:text-white"
+      >
+        Draft Approvals
+        <ArrowRight className="ml-2 h-4 w-4" />
+      </Link>
+    </div>
+  );
+}
