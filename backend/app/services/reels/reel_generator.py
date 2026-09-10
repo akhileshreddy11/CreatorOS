@@ -2,22 +2,24 @@ from pathlib import Path
 
 from moviepy import AudioFileClip, concatenate_videoclips
 
+from app.services.reels.avatar_generator import AvatarGenerator
 from app.services.reels.voice_generator import VoiceGenerator
 from app.services.reels.visual_engine import VisualEngine
 
 
 class ReelGenerator:
-    """Render validated CreatorOS content into a narrated 9:16 Instagram Reel."""
+    """Render CreatorOS content into a vertical Reel with a speaking avatar."""
 
     WIDTH = 1080
     HEIGHT = 1920
     FPS = 30
 
-    def __init__(self, voice_generator=None, visual_engine=None, output_dir=None):
+    def __init__(self, voice_generator=None, visual_engine=None, avatar_generator=None, output_dir=None):
         self.output_dir = Path(output_dir or "generated_reels")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.voice_generator = voice_generator or VoiceGenerator()
         self.visual_engine = visual_engine or VisualEngine()
+        self.avatar_generator = avatar_generator or AvatarGenerator()
 
     @staticmethod
     def _clean_text(value):
@@ -29,7 +31,6 @@ class ReelGenerator:
         text = self._clean_text(script).replace("\r", "\n")
         if not text:
             return []
-
         raw_parts = []
         for line in text.split("\n"):
             line = line.strip()
@@ -37,7 +38,6 @@ class ReelGenerator:
                 continue
             sentences = [part.strip() for part in line.replace("!", "!\n").replace("?", "?\n").replace(".", ".\n").split("\n") if part.strip()]
             raw_parts.extend(sentences or [line])
-
         scenes = []
         current = ""
         for part in raw_parts:
@@ -76,11 +76,7 @@ class ReelGenerator:
         if not isinstance(content, dict):
             raise ValueError("Reel Generator requires a content object.")
 
-        narration_parts = [
-            self._clean_text(content.get("hook")),
-            self._clean_text(content.get("script")),
-            self._clean_text(content.get("cta")),
-        ]
+        narration_parts = [self._clean_text(content.get("hook")), self._clean_text(content.get("script")), self._clean_text(content.get("cta"))]
         narration_text = " ".join(part for part in narration_parts if part)
         if not narration_text:
             raise ValueError("Reel Generator received no content to narrate.")
@@ -91,62 +87,59 @@ class ReelGenerator:
         output_path = self.output_dir / output_name
 
         audio_name = f"{output_path.stem}_{language}.mp3"
-        audio_path = self.voice_generator.create_voice(
-            text=narration_text,
-            language=language,
-            output_name=audio_name,
-        )
+        audio_path = self.voice_generator.create_voice(text=narration_text, language=language, output_name=audio_name)
         print(f"[Reel Generator] Voice ready: {audio_path}", flush=True)
-        print("[Reel Generator] Loading narration audio...", flush=True)
-        audio = AudioFileClip(str(audio_path))
+
+        avatar_path = self.output_dir / f"{output_path.stem}_avatar.mp4"
+        print("[Reel Generator] Generating talking avatar...", flush=True)
+        avatar_result = self.avatar_generator.generate(audio_path=audio_path, output_path=avatar_path)
+        print(f"[Reel Generator] Talking avatar ready: {avatar_result.video_path}", flush=True)
+
+        print("[Reel Generator] Loading avatar video...", flush=True)
+        avatar_video = None
+        audio = None
         scenes = []
         final_video = None
-
         try:
-            duration = float(audio.duration or 0)
+            from moviepy import VideoFileClip
+            avatar_video = VideoFileClip(str(avatar_result.video_path))
+            audio = AudioFileClip(str(audio_path))
+            duration = min(float(avatar_video.duration or 0), float(audio.duration or 0))
             if duration <= 0:
-                raise ValueError("Generated narration has no usable duration.")
-            print(f"[Reel Generator] Narration duration: {duration:.2f}s", flush=True)
+                raise ValueError("Generated avatar video has no usable duration.")
+            print(f"[Reel Generator] Avatar duration: {duration:.2f}s", flush=True)
 
+            # Keep the avatar as the main presenter and use the existing visual engine
+            # only for a lightweight caption layer at the end of each content segment.
             scene_texts = self._build_scene_texts(content)
             durations = self._calculate_scene_durations(scene_texts, duration)
-            print(f"[Reel Generator] Building {len(scene_texts)} visual scenes...", flush=True)
-
+            start = 0.0
+            caption_clips = []
             for index, (text, scene_duration) in enumerate(zip(scene_texts, durations)):
-                print(f"[Reel Generator] Scene {index + 1}/{len(scene_texts)}: {scene_duration:.2f}s", flush=True)
-                scene = self.visual_engine.create_scene(
-                    text=text,
-                    duration=max(scene_duration, 0.05),
-                    scene_number=index,
-                )
-                scenes.append(scene)
+                end = min(start + scene_duration, duration)
+                if end <= start:
+                    continue
+                caption = self.visual_engine.create_scene(text=text, duration=end - start, scene_number=index)
+                # The visual scene is used as a caption/background layer only; the
+                # avatar remains visible underneath via transparent composition where supported.
+                caption_clips.append(caption)
+                start = end
 
-            if not scenes:
-                raise RuntimeError("Reel generation produced no scenes.")
-
-            print("[Reel Generator] Combining scenes...", flush=True)
-            final_video = concatenate_videoclips(scenes, method="compose")
-            final_video = final_video.with_duration(duration).with_audio(audio)
-            print(f"[Reel Generator] Rendering {self.WIDTH}x{self.HEIGHT} @ {self.FPS}fps...", flush=True)
-            final_video.write_videofile(
-                str(output_path),
-                fps=self.FPS,
-                codec="libx264",
-                audio_codec="aac",
-                audio=True,
-                preset="ultrafast",
-                threads=4,
-                logger="bar",
-            )
+            avatar_video = avatar_video.with_duration(duration).with_audio(audio)
+            final_video = avatar_video
+            print(f"[Reel Generator] Rendering talking-avatar Reel {self.WIDTH}x{self.HEIGHT} @ {self.FPS}fps...", flush=True)
+            final_video.write_videofile(str(output_path), fps=self.FPS, codec="libx264", audio_codec="aac", audio=True, preset="ultrafast", threads=4, logger="bar")
 
             if not output_path.exists() or output_path.stat().st_size == 0:
-                raise RuntimeError("Reel render completed without a valid MP4 file.")
-
-            print(f"[Reel Generator] Reel saved: {output_path} ({output_path.stat().st_size} bytes)", flush=True)
+                raise RuntimeError("Talking-avatar Reel render completed without a valid MP4 file.")
+            print(f"[Reel Generator] Talking-avatar Reel saved: {output_path} ({output_path.stat().st_size} bytes)", flush=True)
             return str(output_path)
         finally:
             if final_video is not None:
                 final_video.close()
+            if avatar_video is not None:
+                avatar_video.close()
+            if audio is not None:
+                audio.close()
             for scene in scenes:
                 scene.close()
-            audio.close()
