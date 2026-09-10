@@ -7,7 +7,7 @@ from app.services.reels.voice_generator import VoiceGenerator
 
 
 class ReelGenerator:
-    """Render CreatorOS content into a vertical Reel with a speaking avatar."""
+    """Render CreatorOS content into a photorealistic vertical talking-head Reel."""
 
     WIDTH = 1080
     HEIGHT = 1920
@@ -50,12 +50,12 @@ class ReelGenerator:
         print(f"[Reel Generator] Voice ready: {audio_path}", flush=True)
 
         avatar_path = self.output_dir / f"{output_path.stem}_avatar.mp4"
-        print("[Reel Generator] Generating free talking avatar...", flush=True)
+        print("[Reel Generator] Generating photorealistic local presenter...", flush=True)
         avatar_result = self.avatar_generator.generate(
             audio_path=audio_path,
             output_path=avatar_path,
         )
-        print(f"[Reel Generator] Talking avatar ready: {avatar_result.video_path}", flush=True)
+        print(f"[Reel Generator] Presenter video ready: {avatar_result.video_path}", flush=True)
 
         from moviepy import VideoFileClip
 
@@ -67,12 +67,12 @@ class ReelGenerator:
             audio = AudioFileClip(str(audio_path))
             duration = min(float(avatar_video.duration or 0), float(audio.duration or 0))
             if duration <= 0:
-                raise ValueError("Generated avatar video has no usable duration.")
+                raise ValueError("Generated presenter video has no usable duration.")
 
             avatar_video = avatar_video.with_duration(duration).with_audio(audio)
             final_video = avatar_video
             print(
-                f"[Reel Generator] Rendering final Reel {self.WIDTH}x{self.HEIGHT} @ {self.FPS}fps...",
+                f"[Reel Generator] Rendering final photorealistic Reel {self.WIDTH}x{self.HEIGHT} @ {self.FPS}fps...",
                 flush=True,
             )
             final_video.write_videofile(
@@ -87,9 +87,9 @@ class ReelGenerator:
             )
 
             if not output_path.exists() or output_path.stat().st_size == 0:
-                raise RuntimeError("Talking-avatar Reel render completed without a valid MP4 file.")
+                raise RuntimeError("Presenter Reel render completed without a valid MP4 file.")
             print(
-                f"[Reel Generator] Talking-avatar Reel saved: {output_path} "
+                f"[Reel Generator] Photorealistic Reel saved: {output_path} "
                 f"({output_path.stat().st_size} bytes)",
                 flush=True,
             )
