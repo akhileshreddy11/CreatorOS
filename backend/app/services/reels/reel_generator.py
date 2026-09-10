@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from moviepy import AudioFileClip
 
@@ -22,6 +23,44 @@ class ReelGenerator:
     @staticmethod
     def _clean_text(value):
         return "" if value is None else str(value).strip()
+
+    @staticmethod
+    def _split_script(script):
+        """Split a script into readable sentence-sized scene segments."""
+        text = str(script or "").replace("\r", "\n").strip()
+        if not text:
+            return []
+        parts = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            parts.extend(p.strip() for p in re.split(r"(?<=[.!?])\s+", line) if p.strip())
+        if not parts:
+            return [text]
+
+        scenes = []
+        current = ""
+        for part in parts:
+            candidate = f"{current} {part}".strip()
+            if current and len(candidate) > 150:
+                scenes.append(current)
+                current = part
+            else:
+                current = candidate
+        if current:
+            scenes.append(current)
+        return scenes
+
+    @staticmethod
+    def _calculate_scene_durations(scene_texts, total_duration):
+        """Allocate the available narration time proportionally by text length."""
+        if not scene_texts:
+            return []
+        total_duration = max(float(total_duration or 0), 0.5)
+        weights = [max(len(str(text).strip()), 1) for text in scene_texts]
+        total_weight = sum(weights)
+        return [total_duration * weight / total_weight for weight in weights]
 
     def create_reel(self, content, output_name="creatoros_reel.mp4", language="en"):
         if not isinstance(content, dict):
