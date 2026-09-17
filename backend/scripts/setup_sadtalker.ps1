@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $backend = Split-Path -Parent $PSScriptRoot
 $root = Split-Path -Parent $backend
 $tools = Join-Path $root 'tools'
-sadtalker = Join-Path $tools 'SadTalker'
+$sadtalker = Join-Path $tools 'SadTalker'
 $venv = Join-Path $sadtalker '.venv'
 $checkpoints = Join-Path $sadtalker 'checkpoints'
 
@@ -33,7 +33,6 @@ from huggingface_hub import snapshot_download
 snapshot_download(
     repo_id='vinthony/SadTalker',
     local_dir=r'$($checkpoints.Replace("'", "''"))',
-    local_dir_use_symlinks=False,
 )
 print('SadTalker checkpoints downloaded successfully.')
 "@
