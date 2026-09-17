@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -30,21 +29,33 @@ class SadTalkerGenerator:
 
     def __init__(self, project_root: Optional[str | Path] = None):
         backend_root = Path(__file__).resolve().parents[3]
-        self.project_root = Path(project_root or os.getenv("CREATOROS_PROJECT_ROOT") or backend_root.parent)
-        self.sadtalker_dir = Path(
-            os.getenv("CREATOROS_SADTALKER_DIR")
-            or self.project_root / "tools" / "SadTalker"
+        self.project_root = Path(
+            project_root
+            or os.getenv("CREATOROS_PROJECT_ROOT")
+            or backend_root.parent
+        ).resolve()
+        self.sadtalker_dir = self._resolve_project_path(
+            os.getenv("CREATOROS_SADTALKER_DIR") or "tools/SadTalker"
         )
-        self.source_image = Path(
-            os.getenv("CREATOROS_AVATAR_IMAGE")
-            or self.project_root / "assets" / "creatoros_presenter.png"
+        self.source_image = self._resolve_project_path(
+            os.getenv("CREATOROS_AVATAR_IMAGE") or "assets/creatoros_presenter.png"
         )
         configured_python = os.getenv("CREATOROS_SADTALKER_PYTHON")
-        self.python_executable = Path(configured_python) if configured_python else self._default_python()
-        self.result_root = Path(
-            os.getenv("CREATOROS_SADTALKER_RESULTS")
-            or self.project_root / "backend" / "generated_reels" / "sadtalker_results"
+        self.python_executable = (
+            self._resolve_project_path(configured_python)
+            if configured_python
+            else self._default_python()
         )
+        self.result_root = self._resolve_project_path(
+            os.getenv("CREATOROS_SADTALKER_RESULTS")
+            or "backend/generated_reels/sadtalker_results"
+        )
+
+    def _resolve_project_path(self, value: str | Path) -> Path:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path.resolve()
 
     def _default_python(self) -> Path:
         if os.name == "nt":
@@ -68,9 +79,9 @@ class SadTalkerGenerator:
             "--driven_audio",
             str(audio_path),
             "--source_image",
-            str(self.source_image.resolve()),
+            str(self.source_image),
             "--result_dir",
-            str(run_dir.resolve()),
+            str(run_dir),
             "--still",
             "--preprocess",
             "full",
